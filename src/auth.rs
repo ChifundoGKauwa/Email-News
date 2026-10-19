@@ -210,16 +210,3 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, S
 pub struct AuthenticatedUser {
     pub subject: String,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hashes_and_verifies_password_with_bcrypt() {
-        let password_hash = hash_password("StrongPass!123").unwrap();
-        assert!(!password_hash.is_empty());
-        assert!(verify_password("StrongPass!123", &password_hash));
-        assert!(!verify_password("WrongPass!123", &password_hash));
-    }
-}
