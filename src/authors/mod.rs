@@ -1,14 +1,10 @@
 pub mod handlers;
 pub mod model;
 
-use axum::{
-    Router,
-    routing::{delete, get, post, put},
-};
-
-use handlers::{create_author, delete_author, get_author, get_authors, update_author};
+use axum::{Router, routing::get};
 
 use crate::AppState;
+use handlers::{create_author, delete_author, get_author, get_authors, update_author};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
