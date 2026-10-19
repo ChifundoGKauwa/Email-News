@@ -25,6 +25,7 @@ pub async fn get_newsletters(
             author_id: n.author_id,
             title: n.title,
             content: n.content,
+            image_url: n.image_url,
             published: n.published,
             created_at: n.created_at,
             updated_at: n.updated_at,
@@ -49,6 +50,7 @@ pub async fn get_newsletter(
         author_id: newsletter.author_id,
         title: newsletter.title,
         content: newsletter.content,
+        image_url: newsletter.image_url,
         published: newsletter.published,
         created_at: newsletter.created_at,
         updated_at: newsletter.updated_at,
@@ -65,6 +67,7 @@ pub async fn create_newsletter(
         author_id: Set(payload.author_id),
         title: Set(payload.title.clone()),
         content: Set(payload.content.clone()),
+        image_url: Set(payload.image_url.clone()),
         published: Set(false),
         created_at: Set(now),
         updated_at: Set(now),
@@ -81,6 +84,7 @@ pub async fn create_newsletter(
         author_id: saved.author_id,
         title: saved.title,
         content: saved.content,
+        image_url: saved.image_url,
         published: saved.published,
         created_at: saved.created_at,
         updated_at: saved.updated_at,
@@ -106,6 +110,9 @@ pub async fn update_newsletter(
     if let Some(content) = payload.content {
         active.content = Set(content);
     }
+    if let Some(image_url) = payload.image_url {
+        active.image_url = Set(Some(image_url));
+    }
     if let Some(published) = payload.published {
         active.published = Set(published);
     }
@@ -121,6 +128,7 @@ pub async fn update_newsletter(
         author_id: updated.author_id,
         title: updated.title,
         content: updated.content,
+        image_url: updated.image_url,
         published: updated.published,
         created_at: updated.created_at,
         updated_at: updated.updated_at,
