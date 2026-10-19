@@ -15,6 +15,7 @@ pub struct Author {
 pub struct CreateAuthor {
     pub name: String,
     pub email: String,
+    pub password: String,
     pub bio: Option<String>,
 }
 
