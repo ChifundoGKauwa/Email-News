@@ -8,6 +8,7 @@ pub struct Newsletter {
     pub author_id: Uuid,
     pub title: String,
     pub content: String,
+    pub image_url: Option<String>,
     pub published: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
@@ -18,6 +19,7 @@ pub struct CreateNewsletter {
     pub author_id: Uuid,
     pub title: String,
     pub content: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,4 +27,5 @@ pub struct UpdateNewsletter {
     pub title: Option<String>,
     pub content: Option<String>,
     pub published: Option<bool>,
+    pub image_url: Option<String>,
 }
