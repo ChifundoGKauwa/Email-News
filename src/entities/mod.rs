@@ -2,5 +2,5 @@
 
 pub mod authors;
 pub mod newsletters;
-pub mod prelude;
+
 pub mod subscribers;
