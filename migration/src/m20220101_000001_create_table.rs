@@ -15,6 +15,16 @@ impl MigrationTrait for Migration {
                     .col(string(Subscribers::Email).unique_key().not_null())
                     .col(string(Subscribers::Name))
                     .col(date_time(Subscribers::SubscribedAt).not_null())
+                    .col(
+                        string(Subscribers::Status)
+                            .not_null()
+                            .default("pending_confirmation"),
+                    )
+                    .col(
+                        string(Subscribers::ConfirmationToken)
+                            .not_null()
+                            .default(""),
+                    )
                     .to_owned(),
             )
             .await
@@ -34,4 +44,6 @@ enum Subscribers {
     Email,
     Name,
     SubscribedAt,
+    Status,
+    ConfirmationToken,
 }
