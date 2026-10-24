@@ -1,5 +1,5 @@
 # Build the application and migration runner.
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
 # Install native build dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
