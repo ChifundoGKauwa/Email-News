@@ -7,9 +7,10 @@ use axum::{
     Json, Router,
     extract::{Request, State},
     http::{StatusCode, header::AUTHORIZATION},
+    middleware,
     middleware::Next,
     response::Response,
-    routing::post,
+    routing::{get, post},
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
@@ -98,10 +99,33 @@ pub struct AuthResponse {
     pub author: Author,
 }
 
-pub fn routes() -> Router<AppState> {
-    Router::new()
+pub fn routes(jwt_secret: String) -> Router<AppState> {
+    let public = Router::new()
         .route("/register", post(register_author))
-        .route("/login", post(login_author))
+        .route("/login", post(login_author));
+    let protected = Router::new()
+        .route("/session", get(get_session))
+        .route_layer(middleware::from_fn_with_state(jwt_secret, auth_middleware));
+    public.merge(protected)
+}
+
+pub async fn get_session(
+    State(state): State<AppState>,
+    axum::extract::Extension(user): axum::extract::Extension<AuthenticatedUser>,
+) -> Result<Json<Author>, StatusCode> {
+    let author = AuthorEntity::find_by_id(user.author_id)
+        .one(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    Ok(Json(Author {
+        id: author.id,
+        name: author.name,
+        email: author.email,
+        bio: author.bio,
+        created_at: author.created_at,
+    }))
 }
 
 pub async fn register_author(
