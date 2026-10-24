@@ -1,1 +1,7 @@
-/target
+.env
+.env.*
+!.env.example
+target/
+**/target/
+*.dump
+*.log

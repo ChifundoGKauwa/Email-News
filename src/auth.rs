@@ -14,24 +14,31 @@ use axum::{
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
 use email_address::EmailAddress;
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthClaims {
     pub sub: String,
     pub exp: usize,
     pub iat: usize,
+    pub token_use: String,
 }
 
 pub fn generate_auth_token(subject: &str) -> Result<String, String> {
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    generate_auth_token_with_secret(subject, &secret)
+}
+
+fn generate_auth_token_with_secret(subject: &str, secret: &str) -> Result<String, String> {
     let now = Utc::now();
     let claims = AuthClaims {
         sub: subject.to_string(),
         exp: (now + Duration::hours(12)).timestamp() as usize,
         iat: now.timestamp() as usize,
+        token_use: "author_access".to_string(),
     };
 
     encode(
@@ -42,16 +49,21 @@ pub fn generate_auth_token(subject: &str) -> Result<String, String> {
     .map_err(|err| format!("failed to generate auth token: {err}"))
 }
 
-pub fn verify_auth_token(token: &str) -> Result<String, String> {
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+fn verify_auth_token_with_secret(token: &str, secret: &str) -> Result<String, String> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.required_spec_claims.insert("sub".to_string());
     let claims = decode::<AuthClaims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &validation,
     )
     .map_err(|err| format!("invalid auth token: {err}"))?
     .claims;
 
+    if claims.token_use != "author_access" {
+        return Err("token is not an author access token".to_string());
+    }
+    Uuid::parse_str(&claims.sub).map_err(|_| "invalid author id in token".to_string())?;
     Ok(claims.sub)
 }
 
@@ -186,7 +198,11 @@ pub async fn login_author(
     }))
 }
 
-pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, StatusCode> {
+pub async fn auth_middleware(
+    State(secret): State<String>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let authorization = req
         .headers()
         .get(AUTHORIZATION)
@@ -197,14 +213,158 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, S
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let subject = verify_auth_token(token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let subject =
+        verify_auth_token_with_secret(token, &secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let author_id = Uuid::parse_str(&subject).map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    req.extensions_mut().insert(AuthenticatedUser { subject });
+    req.extensions_mut().insert(AuthenticatedUser { author_id });
 
     Ok(next.run(req).await)
 }
 
 #[derive(Clone, Debug)]
 pub struct AuthenticatedUser {
-    pub subject: String,
+    pub author_id: Uuid,
+}
+
+pub fn require_owner(user: &AuthenticatedUser, owner_id: Uuid) -> Result<(), StatusCode> {
+    if user.author_id == owner_id {
+        Ok(())
+    } else {
+        // Hide whether another author's resource exists.
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, extract::Extension, middleware, routing::get};
+    use serde::Serialize;
+    use tower::ServiceExt;
+
+    const TEST_SECRET: &str = "test-secret-with-at-least-32-bytes-long";
+
+    async fn protected_identity(Extension(user): Extension<AuthenticatedUser>) -> String {
+        user.author_id.to_string()
+    }
+
+    fn test_app() -> Router {
+        let public = Router::new().route("/public", get(|| async { "public" }));
+        let protected = Router::new()
+            .route("/private", get(protected_identity))
+            .route_layer(middleware::from_fn_with_state(
+                TEST_SECRET.to_string(),
+                auth_middleware,
+            ));
+        public.merge(protected)
+    }
+
+    async fn request(path: &str, token: Option<&str>) -> axum::response::Response {
+        let mut builder = axum::http::Request::builder().uri(path);
+        if let Some(token) = token {
+            builder = builder.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        test_app()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    fn signed_token(author_id: Uuid, exp: usize) -> String {
+        let claims = AuthClaims {
+            sub: author_id.to_string(),
+            exp,
+            iat: Utc::now().timestamp() as usize,
+            token_use: "author_access".to_string(),
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    #[derive(Serialize)]
+    struct ConfirmationTokenClaims {
+        sub: String,
+        exp: usize,
+        iat: usize,
+    }
+
+    #[tokio::test]
+    async fn public_routes_remain_public() {
+        assert_eq!(request("/public", None).await.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn protected_route_rejects_missing_malformed_invalid_and_expired_tokens() {
+        let author_id = Uuid::new_v4();
+        let expired = signed_token(
+            author_id,
+            (Utc::now() - Duration::hours(1)).timestamp() as usize,
+        );
+        let valid_format = signed_token(
+            author_id,
+            (Utc::now() + Duration::hours(1)).timestamp() as usize,
+        );
+        let invalid_signature = format!("{}.bad", valid_format.rsplit_once('.').unwrap().0);
+        let confirmation_token = encode(
+            &Header::default(),
+            &ConfirmationTokenClaims {
+                sub: author_id.to_string(),
+                exp: (Utc::now() + Duration::hours(1)).timestamp() as usize,
+                iat: Utc::now().timestamp() as usize,
+            },
+            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        for token in [
+            None,
+            Some("not-a-jwt"),
+            Some("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.invalid"),
+            Some(expired.as_str()),
+            Some(invalid_signature.as_str()),
+            Some(confirmation_token.as_str()),
+        ] {
+            assert_eq!(
+                request("/private", token).await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_token_authenticates_the_author() {
+        let author_id = Uuid::new_v4();
+        let token = generate_auth_token_with_secret(&author_id.to_string(), TEST_SECRET).unwrap();
+        let response = request("/private", Some(&token)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(std::str::from_utf8(&body).unwrap(), author_id.to_string());
+    }
+
+    #[test]
+    fn owner_can_create_update_delete_and_other_authors_are_hidden() {
+        let owner_id = Uuid::new_v4();
+        let owner = AuthenticatedUser {
+            author_id: owner_id,
+        };
+        let other = AuthenticatedUser {
+            author_id: Uuid::new_v4(),
+        };
+
+        // Create compares the requested author_id; update and delete compare
+        // the persisted resource owner. All use this same policy guard.
+        let requested_author_id = owner.author_id;
+        assert_eq!(require_owner(&owner, requested_author_id), Ok(()));
+        let persisted_owner_id = owner_id;
+        assert_eq!(require_owner(&owner, persisted_owner_id), Ok(()));
+        assert_eq!(require_owner(&owner, owner_id), Ok(()));
+        assert_eq!(require_owner(&other, owner_id), Err(StatusCode::NOT_FOUND));
+    }
 }

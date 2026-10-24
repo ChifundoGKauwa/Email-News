@@ -4,23 +4,34 @@ This document describes the backend API contract for the frontend team.
 
 ## Base URL
 
-The app binds to the local loopback address. The default port is `8001`, but it can be overridden by the `PORT` environment variable.
+The app binds to `0.0.0.0` and uses the `PORT` environment variable. The local default is `8004`; Render supplies `PORT` at runtime.
 
 Examples:
 
-- Default: `http://127.0.0.1:8001`
-- Custom: `http://127.0.0.1:8002`
+- Local: `http://127.0.0.1:8004`
+- Custom: use the value of `PORT`.
 
 ## Authentication policy
 
-For the frontend contract, the API is intentionally kept open for normal CRUD usage.
+`POST /auth/register` and `POST /auth/login` are public and keep the existing
+`{ "token": "…", "author": { … } }` success response. Send that JWT on
+protected API requests using `Authorization: Bearer <token>`.
 
-- `POST /auth/register` is public.
-- `POST /auth/login` is public.
-- `GET /authors`, `POST /authors`, `PUT /authors/{id}`, `DELETE /authors/{id}` are public.
-- `GET /newsletters`, `POST /newsletters`, `PUT /newsletters/{id}`, `DELETE /newsletters/{id}` are public.
-- `POST /subscribers` and `GET /subscribers/confirm/{token}` are public.
-- The app generates JWTs for successful author login and for subscriber confirmation, but the current frontend-facing contract does not require a bearer token for normal CRUD operations.
+- Public reads: `GET /authors`, `GET /authors/{id}`, `GET /newsletters`, and
+  `GET /newsletters/{id}`.
+- Author administration: `POST /authors`, `PUT /authors/{id}`, and
+  `DELETE /authors/{id}` require authentication. Update/delete are limited to
+  the author represented by the token.
+- Newsletter writes: `POST /newsletters`, `PUT /newsletters/{id}`, and
+  `DELETE /newsletters/{id}` require authentication. Create requires the
+  request's `author_id` to match the token, and update/delete are limited to
+  the resource owner. Cross-author resources return `404`.
+- Subscriber subscription remains public: `POST /subscribers` and
+  `GET /subscribers/confirm/{token}`.
+- Subscriber administration: `GET /subscribers`, `GET /subscribers/{id}`, and
+  `DELETE /subscribers/{id}` require authentication.
+
+Missing, malformed, expired, and invalid bearer tokens receive `401`.
 
 ## Common response patterns
 
@@ -39,8 +50,9 @@ Most successful responses return the created or updated object as JSON.
 ### Error responses
 
 - `400 Bad Request`: invalid body, invalid email, or invalid JWT
-- `401 Unauthorized`: invalid or missing credentials when auth is being checked
-- `404 Not Found`: entity not found
+- `401 Unauthorized`: missing or invalid credentials on a protected route
+- `403 Forbidden`: authenticated caller is not permitted to perform the action
+- `404 Not Found`: entity not found or a cross-author resource hidden by the API
 - `409 Conflict`: duplicate record, such as duplicate email
 - `500 Internal Server Error`: server-side failure
 
@@ -399,30 +411,13 @@ Returns:
 
 Example confirmation link:
 
-```text
-http://127.0.0.1:8001/subscribers/confirm/{token}
-```
+The link uses `APP_BASE_URL` followed by `/subscribers/confirm/{token}`.
 
 ## Environment variables
 
-```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/email_news
-PORT=8002
-JWT_SECRET=your-secret-key
-APP_BASE_URL=http://127.0.0.1:8002
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USERNAME=your-user
-SMTP_PASSWORD=your-password
-EMAIL_FROM=no-reply@example.com
-```
-
-For Gmail, use the Gmail SMTP server and a Google App Password instead of your normal account password:
-
-```bash
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=you@gmail.com
-SMTP_PASSWORD=abcdefghijklmnop
-EMAIL_FROM=you@gmail.com
-```
+Configure `DATABASE_URL` and a `JWT_SECRET` of at least 32 bytes. `PORT`,
+`APP_BASE_URL`, and `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`,
+`SMTP_PASSWORD`, and `EMAIL_FROM` are optional depending on deployment and email
+delivery needs. For local development, put values in the ignored root `.env`;
+for Render, use the service's Environment settings. Use a provider app password
+for Gmail SMTP. See the README for deployment instructions.

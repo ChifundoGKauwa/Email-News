@@ -5,6 +5,8 @@ mod subscribers;
 
 use axum::Router;
 use dotenvy::dotenv;
+#[cfg(test)]
+use sea_orm::ConnectOptions;
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement};
 use std::env;
 mod entities;
@@ -76,9 +78,9 @@ async fn main() {
 
     let app = Router::new()
         .nest("/auth", auth::routes())
-        .nest("/authors", authors::routes())
-        .nest("/newsletters", newsletters::routes())
-        .nest("/subscribers", subscribers::routes())
+        .nest("/authors", authors::routes(jwt_secret.clone()))
+        .nest("/newsletters", newsletters::routes(jwt_secret.clone()))
+        .nest("/subscribers", subscribers::routes(jwt_secret))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
@@ -87,4 +89,44 @@ async fn main() {
         .unwrap_or_else(|err| panic!("failed to bind to {addr}: {err}"));
     println!("server running on http://{addr}");
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod route_policy_tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    const TEST_SECRET: &str = "test-secret-with-at-least-32-bytes-long";
+
+    async fn test_app() -> Router {
+        let mut options = ConnectOptions::new("postgres://localhost/noted_test");
+        options.connect_lazy(true);
+        let state = AppState {
+            db: Database::connect(options).await.unwrap(),
+        };
+        Router::new()
+            .nest("/auth", auth::routes())
+            .nest("/authors", authors::routes(TEST_SECRET.to_string()))
+            .nest("/newsletters", newsletters::routes(TEST_SECRET.to_string()))
+            .nest("/subscribers", subscribers::routes(TEST_SECRET.to_string()))
+            .with_state(state)
+    }
+
+    async fn status(app: &Router, method: &str, uri: &str, body: &str) -> axum::http::StatusCode {
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
 }

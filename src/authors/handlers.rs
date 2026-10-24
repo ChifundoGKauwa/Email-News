@@ -1,10 +1,10 @@
 use crate::AppState;
-use crate::auth::hash_password;
+use crate::auth::{AuthenticatedUser, hash_password, require_owner};
 use crate::authors::model::{Author, CreateAuthor, UpdateAuthor};
 use crate::entities::authors::{self, Entity as AuthorEntity};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
 };
 use chrono::Utc;
@@ -89,6 +89,7 @@ pub async fn create_author(
 
 pub async fn update_author(
     State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateAuthor>,
 ) -> Result<Json<Author>, StatusCode> {
@@ -97,6 +98,7 @@ pub async fn update_author(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+    require_owner(&user, author.id)?;
 
     let mut active: authors::ActiveModel = author.into();
 
@@ -124,10 +126,21 @@ pub async fn update_author(
     }))
 }
 
-pub async fn delete_author(State(state): State<AppState>, Path(id): Path<Uuid>) -> StatusCode {
+pub async fn delete_author(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let author = AuthorEntity::find_by_id(id)
+        .one(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    require_owner(&user, author.id)?;
+
     match AuthorEntity::delete_by_id(id).exec(&state.db).await {
-        Ok(res) if res.rows_affected > 0 => StatusCode::NO_CONTENT,
-        Ok(_) => StatusCode::NOT_FOUND,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Ok(res) if res.rows_affected > 0 => Ok(StatusCode::NO_CONTENT),
+        Ok(_) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

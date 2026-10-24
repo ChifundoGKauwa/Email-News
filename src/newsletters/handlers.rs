@@ -1,9 +1,10 @@
 use crate::AppState;
+use crate::auth::{AuthenticatedUser, require_owner};
 use crate::entities::newsletters::{self, Entity as NewsletterEntity};
 use crate::newsletters::model::{CreateNewsletter, Newsletter, UpdateNewsletter};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
 };
 use chrono::Utc;
@@ -59,12 +60,14 @@ pub async fn get_newsletter(
 
 pub async fn create_newsletter(
     State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
     Json(payload): Json<CreateNewsletter>,
 ) -> Result<Json<Newsletter>, StatusCode> {
+    require_owner(&user, payload.author_id)?;
     let now = Utc::now().naive_utc();
 
     let new_newsletter = newsletters::ActiveModel {
-        author_id: Set(payload.author_id),
+        author_id: Set(user.author_id),
         title: Set(payload.title.clone()),
         content: Set(payload.content.clone()),
         image_url: Set(payload.image_url.clone()),
@@ -93,6 +96,7 @@ pub async fn create_newsletter(
 
 pub async fn update_newsletter(
     State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateNewsletter>,
 ) -> Result<Json<Newsletter>, StatusCode> {
@@ -101,6 +105,7 @@ pub async fn update_newsletter(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+    require_owner(&user, newsletter.author_id)?;
 
     let mut active: newsletters::ActiveModel = newsletter.into();
 
@@ -135,10 +140,21 @@ pub async fn update_newsletter(
     }))
 }
 
-pub async fn delete_newsletter(State(state): State<AppState>, Path(id): Path<Uuid>) -> StatusCode {
+pub async fn delete_newsletter(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let newsletter = NewsletterEntity::find_by_id(id)
+        .one(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    require_owner(&user, newsletter.author_id)?;
+
     match NewsletterEntity::delete_by_id(id).exec(&state.db).await {
-        Ok(res) if res.rows_affected > 0 => StatusCode::NO_CONTENT,
-        Ok(_) => StatusCode::NOT_FOUND,
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Ok(res) if res.rows_affected > 0 => Ok(StatusCode::NO_CONTENT),
+        Ok(_) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

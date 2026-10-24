@@ -101,7 +101,10 @@ fn validate_smtp_configuration(smtp_host: &str) -> Result<(), String> {
 
 fn build_confirmation_link(token: &str) -> String {
     let base_url = env::var("APP_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8004".to_string());
-    format!("{}/subscribers/confirm/{token}", base_url.trim_end_matches('/'))
+    format!(
+        "{}/subscribers/confirm/{token}",
+        base_url.trim_end_matches('/')
+    )
 }
 
 fn send_confirmation_email(recipient: &str, link: &str) -> Result<(), String> {

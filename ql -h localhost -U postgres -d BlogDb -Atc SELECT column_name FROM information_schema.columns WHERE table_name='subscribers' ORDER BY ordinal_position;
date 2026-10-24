@@ -1,0 +1,11 @@
+                               Table "public.subscribers"
+    Column     |            Type             | Collation | Nullable |      Default      
+---------------+-----------------------------+-----------+----------+-------------------
+ id            | uuid                        |           | not null | gen_random_uuid()
+ email         | character varying           |           | not null | 
+ name          | character varying           |           | not null | 
+ subscribed_at | timestamp without time zone |           | not null | 
+Indexes:
+    "subscribers_pkey" PRIMARY KEY, btree (id)
+    "subscribers_email_key" UNIQUE CONSTRAINT, btree (email)
+
