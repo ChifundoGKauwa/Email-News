@@ -77,7 +77,7 @@ async fn main() {
     let state = AppState { db };
 
     let app = Router::new()
-        .nest("/auth", auth::routes())
+        .nest("/auth", auth::routes(jwt_secret.clone()))
         .nest("/authors", authors::routes(jwt_secret.clone()))
         .nest("/newsletters", newsletters::routes(jwt_secret.clone()))
         .nest("/subscribers", subscribers::routes(jwt_secret))
@@ -107,7 +107,7 @@ mod route_policy_tests {
             db: Database::connect(options).await.unwrap(),
         };
         Router::new()
-            .nest("/auth", auth::routes())
+            .nest("/auth", auth::routes(TEST_SECRET.to_string()))
             .nest("/authors", authors::routes(TEST_SECRET.to_string()))
             .nest("/newsletters", newsletters::routes(TEST_SECRET.to_string()))
             .nest("/subscribers", subscribers::routes(TEST_SECRET.to_string()))
@@ -129,4 +129,12 @@ mod route_policy_tests {
             .status()
     }
 
+    #[tokio::test]
+    async fn session_endpoint_requires_a_validated_bearer_token() {
+        let app = test_app().await;
+        assert_eq!(
+            status(&app, "GET", "/auth/session", "").await,
+            axum::http::StatusCode::UNAUTHORIZED,
+        );
+    }
 }
