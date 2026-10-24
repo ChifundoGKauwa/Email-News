@@ -51,8 +51,7 @@ pub fn validate_email(email: &str) -> Result<(), String> {
 }
 
 pub fn generate_confirmation_token(subscriber_id: Uuid) -> Result<String, String> {
-    let secret =
-        std::env::var("JWT_SECRET").unwrap_or_else(|_| "email-news-dev-secret".to_string());
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let now = Utc::now();
     let claims = ConfirmationClaims {
         sub: subscriber_id.to_string(),
@@ -69,8 +68,7 @@ pub fn generate_confirmation_token(subscriber_id: Uuid) -> Result<String, String
 }
 
 pub fn verify_confirmation_token(token: &str) -> Result<Uuid, String> {
-    let secret =
-        std::env::var("JWT_SECRET").unwrap_or_else(|_| "email-news-dev-secret".to_string());
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let decoded = decode::<ConfirmationClaims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
