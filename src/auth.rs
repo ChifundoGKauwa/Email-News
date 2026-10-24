@@ -26,8 +26,7 @@ pub struct AuthClaims {
 }
 
 pub fn generate_auth_token(subject: &str) -> Result<String, String> {
-    let secret =
-        std::env::var("JWT_SECRET").unwrap_or_else(|_| "email-news-dev-secret".to_string());
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let now = Utc::now();
     let claims = AuthClaims {
         sub: subject.to_string(),
@@ -44,8 +43,7 @@ pub fn generate_auth_token(subject: &str) -> Result<String, String> {
 }
 
 pub fn verify_auth_token(token: &str) -> Result<String, String> {
-    let secret =
-        std::env::var("JWT_SECRET").unwrap_or_else(|_| "email-news-dev-secret".to_string());
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let claims = decode::<AuthClaims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
