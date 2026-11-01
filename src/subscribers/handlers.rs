@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::AuthenticatedUser;
 use crate::entities::subscribers::{self, Entity as SubscriberEntity};
 use crate::subscribers::model::{
     CONFIRMED_SUBSCRIPTION_STATUS, CreateSubscriber, PENDING_SUBSCRIPTION_STATUS, Subscriber,
@@ -6,7 +7,7 @@ use crate::subscribers::model::{
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -160,16 +161,25 @@ fn send_confirmation_email(recipient: &str, link: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn filter_visible_subscribers(subscribers: Vec<subscribers::Model>) -> Vec<subscribers::Model> {
+    subscribers
+        .into_iter()
+        .filter(|subscriber| subscriber.status == CONFIRMED_SUBSCRIPTION_STATUS)
+        .collect()
+}
+
 // get all subscribers
 pub async fn get_subscribers(
     State(state): State<AppState>,
+    Extension(_user): Extension<AuthenticatedUser>,
 ) -> Result<Json<Vec<Subscriber>>, StatusCode> {
     let subscribers = SubscriberEntity::find()
+        .filter(crate::entities::subscribers::Column::Status.eq(CONFIRMED_SUBSCRIPTION_STATUS))
         .all(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let result = subscribers
+    let result = filter_visible_subscribers(subscribers)
         .into_iter()
         .map(|s| Subscriber {
             id: s.id,
@@ -187,6 +197,7 @@ pub async fn get_subscribers(
 // get subscriber by ID
 pub async fn get_subscriber(
     State(state): State<AppState>,
+    Extension(_user): Extension<AuthenticatedUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Subscriber>, StatusCode> {
     let subscriber = SubscriberEntity::find_by_id(id)
@@ -194,6 +205,10 @@ pub async fn get_subscriber(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    if subscriber.status != CONFIRMED_SUBSCRIPTION_STATUS {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     Ok(Json(Subscriber {
         id: subscriber.id,
@@ -330,3 +345,4 @@ pub async fn delete_subscriber(State(state): State<AppState>, Path(id): Path<Uui
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
+
