@@ -5,6 +5,7 @@ mod m20220101_000002_create_authors_and_newsletters;
 mod m20261003_000001_add_subscription_confirmation_fields;
 mod m20261003_000002_add_author_auth_fields;
 mod m20261007_000003_add_image_url_to_newsletters;
+mod m20261119_000001_add_reader_interactions;
 
 pub struct Migrator;
 
@@ -17,6 +18,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261003_000001_add_subscription_confirmation_fields::Migration),
             Box::new(m20261003_000002_add_author_auth_fields::Migration),
             Box::new(m20261007_000003_add_image_url_to_newsletters::Migration),
+            Box::new(m20261119_000001_add_reader_interactions::Migration),
         ]
     }
 }
