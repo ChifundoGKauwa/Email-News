@@ -11,7 +11,7 @@ use handlers::{
     create_newsletter, delete_newsletter, get_newsletter, get_newsletters, update_newsletter,
 };
 
-pub fn routes(jwt_secret: String) -> Router<AppState> {
+pub fn routes(jwt_secret: String, db: sea_orm::DatabaseConnection) -> Router<AppState> {
     let public = Router::new()
         .route("/", get(get_newsletters))
         .route("/{id}", get(get_newsletter));
@@ -19,7 +19,7 @@ pub fn routes(jwt_secret: String) -> Router<AppState> {
         .route("/", post(create_newsletter))
         .route("/{id}", put(update_newsletter).delete(delete_newsletter))
         .route_layer(middleware::from_fn_with_state(
-            jwt_secret,
+            crate::auth::AuthorAuthState { secret: jwt_secret, db: Some(db) },
             crate::auth::auth_middleware,
         ));
 
