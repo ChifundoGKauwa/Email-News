@@ -11,6 +11,14 @@ pub struct Author {
     pub created_at: NaiveDateTime,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PublicAuthor {
+    pub id: Uuid,
+    pub name: String,
+    pub bio: Option<String>,
+    pub created_at: NaiveDateTime,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateAuthor {
     pub name: String,
