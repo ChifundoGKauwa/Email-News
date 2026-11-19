@@ -9,6 +9,8 @@ Rust backend for managing authors, newsletters, and subscriber confirmation.
 - Subscriber registration flow with pending confirmation
 - JWT-based verification link for subscription confirmation
 - Email validation before subscriber creation
+- Reader registration and JWT login
+- Story claps, comments, bookmarks, and highlights
 
 ## Stack
 
@@ -42,6 +44,8 @@ Optional settings:
 - `PORT`: listen port (defaults to `8004`; Render supplies this automatically)
 - `APP_BASE_URL`: public base URL used in subscription confirmation links
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `EMAIL_FROM`
+- `SUBSCRIBER_ADMIN_AUTHOR_IDS`: comma-separated author UUIDs allowed to read or
+  delete subscriber records. Subscriber administration is disabled when unset.
 
 Render does not read your local `.env` file. Add the required settings under the
 Render service's Environment page; keep those production values out of Git.
