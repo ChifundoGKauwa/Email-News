@@ -1,7 +1,9 @@
 mod auth;
 mod authors;
 mod newsletters;
+mod readers;
 mod subscribers;
+mod interactions;
 
 use axum::Router;
 use dotenvy::dotenv;
@@ -74,10 +76,12 @@ async fn main() {
     let state = AppState { db };
 
     let app = Router::new()
-        .nest("/auth", auth::routes(jwt_secret.clone()))
-        .nest("/authors", authors::routes(jwt_secret.clone()))
-        .nest("/newsletters", newsletters::routes(jwt_secret.clone()))
-        .nest("/subscribers", subscribers::routes(jwt_secret))
+        .nest("/auth", auth::routes(jwt_secret.clone(), state.db.clone()))
+        .nest("/authors", authors::routes(jwt_secret.clone(), state.db.clone()))
+        .nest("/newsletters", newsletters::routes(jwt_secret.clone(), state.db.clone()))
+        .nest("/readers", readers::routes(jwt_secret.clone(), state.db.clone()))
+        .nest("/interactions", interactions::routes(jwt_secret.clone(), state.db.clone()))
+        .nest("/subscribers", subscribers::routes(jwt_secret, state.db.clone()))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
