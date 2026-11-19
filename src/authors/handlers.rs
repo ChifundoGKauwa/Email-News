@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::auth::{AuthenticatedUser, hash_password, require_owner};
-use crate::authors::model::{Author, CreateAuthor, UpdateAuthor};
+use crate::authors::model::{Author, CreateAuthor, PublicAuthor, UpdateAuthor};
 use crate::entities::authors::{self, Entity as AuthorEntity};
 use axum::{
     Json,
@@ -8,10 +8,10 @@ use axum::{
     http::StatusCode,
 };
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
-pub async fn get_authors(State(state): State<AppState>) -> Result<Json<Vec<Author>>, StatusCode> {
+pub async fn get_authors(State(state): State<AppState>) -> Result<Json<Vec<PublicAuthor>>, StatusCode> {
     let authors = AuthorEntity::find()
         .all(&state.db)
         .await
@@ -19,10 +19,9 @@ pub async fn get_authors(State(state): State<AppState>) -> Result<Json<Vec<Autho
 
     let result = authors
         .into_iter()
-        .map(|a| Author {
+        .map(|a| PublicAuthor {
             id: a.id,
             name: a.name,
-            email: a.email,
             bio: a.bio,
             created_at: a.created_at,
         })
@@ -34,17 +33,16 @@ pub async fn get_authors(State(state): State<AppState>) -> Result<Json<Vec<Autho
 pub async fn get_author(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Author>, StatusCode> {
+) -> Result<Json<PublicAuthor>, StatusCode> {
     let author = AuthorEntity::find_by_id(id)
         .one(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(Author {
+    Ok(Json(PublicAuthor {
         id: author.id,
         name: author.name,
-        email: author.email,
         bio: author.bio,
         created_at: author.created_at,
     }))
@@ -55,14 +53,28 @@ pub async fn create_author(
     Json(payload): Json<CreateAuthor>,
 ) -> Result<Json<Author>, StatusCode> {
     let email = payload.email.trim().to_lowercase();
-    if email.is_empty() {
+    let name = payload.name.trim();
+    if name.is_empty() || !email_address::EmailAddress::is_valid(&email) {
         return Err(StatusCode::BAD_REQUEST);
+    }
+    if payload.password.trim().len() < 8 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if AuthorEntity::find()
+        .filter(authors::Column::Email.eq(&email))
+        .one(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some()
+    {
+        return Err(StatusCode::CONFLICT);
     }
 
     let password_hash =
         hash_password(payload.password.trim()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let new_author = authors::ActiveModel {
-        name: Set(payload.name.trim().to_string()),
+        name: Set(name.to_string()),
         email: Set(email.clone()),
         email_hash: Set(String::new()),
         email_salt: Set(String::new()),
@@ -103,9 +115,27 @@ pub async fn update_author(
     let mut active: authors::ActiveModel = author.into();
 
     if let Some(name) = payload.name {
-        active.name = Set(name);
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        active.name = Set(name.to_string());
     }
     if let Some(email) = payload.email {
+        let email = email.trim().to_lowercase();
+        if !email_address::EmailAddress::is_valid(&email) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        if AuthorEntity::find()
+            .filter(authors::Column::Email.eq(&email))
+            .filter(authors::Column::Id.ne(id))
+            .one(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .is_some()
+        {
+            return Err(StatusCode::CONFLICT);
+        }
         active.email = Set(email);
     }
     if let Some(bio) = payload.bio {
