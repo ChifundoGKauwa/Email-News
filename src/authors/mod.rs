@@ -9,7 +9,7 @@ use axum::{
 use crate::AppState;
 use handlers::{create_author, delete_author, get_author, get_authors, update_author};
 
-pub fn routes(jwt_secret: String) -> Router<AppState> {
+pub fn routes(jwt_secret: String, db: sea_orm::DatabaseConnection) -> Router<AppState> {
     let public = Router::new()
         .route("/", get(get_authors))
         .route("/{id}", get(get_author));
@@ -17,7 +17,7 @@ pub fn routes(jwt_secret: String) -> Router<AppState> {
         .route("/", post(create_author))
         .route("/{id}", put(update_author).delete(delete_author))
         .route_layer(middleware::from_fn_with_state(
-            jwt_secret,
+            crate::auth::AuthorAuthState { secret: jwt_secret, db: Some(db) },
             crate::auth::auth_middleware,
         ));
 
