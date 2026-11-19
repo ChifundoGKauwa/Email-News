@@ -14,6 +14,7 @@ pub struct Subscriber {
     pub subscribed_at: NaiveDateTime,
     pub name: String,
     pub status: String,
+    #[serde(skip_serializing)]
     pub confirmation_token: Option<String>,
 }
 
@@ -24,16 +25,11 @@ pub struct CreateSubscriber {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Subscriberresponse {
-    pub email: String,
-    pub id: Uuid,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct ConfirmationClaims {
     sub: String,
     exp: usize,
     iat: usize,
+    jti: String,
 }
 
 pub fn validate_email(email: &str) -> Result<(), String> {
@@ -57,6 +53,7 @@ pub fn generate_confirmation_token(subscriber_id: Uuid) -> Result<String, String
         sub: subscriber_id.to_string(),
         exp: (now + Duration::hours(24)).timestamp() as usize,
         iat: now.timestamp() as usize,
+        jti: Uuid::new_v4().to_string(),
     };
 
     encode(
