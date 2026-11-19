@@ -8,13 +8,14 @@ use axum::{
     http::StatusCode,
 };
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 pub async fn get_newsletters(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Newsletter>>, StatusCode> {
     let newsletters = NewsletterEntity::find()
+        .filter(newsletters::Column::Published.eq(true))
         .all(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -41,6 +42,7 @@ pub async fn get_newsletter(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Newsletter>, StatusCode> {
     let newsletter = NewsletterEntity::find_by_id(id)
+        .filter(newsletters::Column::Published.eq(true))
         .one(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -64,12 +66,17 @@ pub async fn create_newsletter(
     Json(payload): Json<CreateNewsletter>,
 ) -> Result<Json<Newsletter>, StatusCode> {
     require_owner(&user, payload.author_id)?;
+    let title = payload.title.trim();
+    let content = payload.content.trim();
+    if title.is_empty() || content.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let now = Utc::now().naive_utc();
 
     let new_newsletter = newsletters::ActiveModel {
         author_id: Set(user.author_id),
-        title: Set(payload.title.clone()),
-        content: Set(payload.content.clone()),
+        title: Set(title.to_string()),
+        content: Set(content.to_string()),
         image_url: Set(payload.image_url.clone()),
         published: Set(false),
         created_at: Set(now),
@@ -110,10 +117,18 @@ pub async fn update_newsletter(
     let mut active: newsletters::ActiveModel = newsletter.into();
 
     if let Some(title) = payload.title {
-        active.title = Set(title);
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        active.title = Set(title.to_string());
     }
     if let Some(content) = payload.content {
-        active.content = Set(content);
+        let content = content.trim();
+        if content.is_empty() {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        active.content = Set(content.to_string());
     }
     if let Some(image_url) = payload.image_url {
         active.image_url = Set(Some(image_url));
