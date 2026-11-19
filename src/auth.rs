@@ -28,6 +28,12 @@ pub struct AuthClaims {
     pub token_use: String,
 }
 
+#[derive(Clone)]
+pub struct AuthorAuthState {
+    pub secret: String,
+    pub db: Option<sea_orm::DatabaseConnection>,
+}
+
 pub fn generate_auth_token(subject: &str) -> Result<String, String> {
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     generate_auth_token_with_secret(subject, &secret)
@@ -99,13 +105,16 @@ pub struct AuthResponse {
     pub author: Author,
 }
 
-pub fn routes(jwt_secret: String) -> Router<AppState> {
+pub fn routes(jwt_secret: String, db: sea_orm::DatabaseConnection) -> Router<AppState> {
     let public = Router::new()
         .route("/register", post(register_author))
         .route("/login", post(login_author));
     let protected = Router::new()
         .route("/session", get(get_session))
-        .route_layer(middleware::from_fn_with_state(jwt_secret, auth_middleware));
+        .route_layer(middleware::from_fn_with_state(
+            AuthorAuthState { secret: jwt_secret, db: Some(db) },
+            auth_middleware,
+        ));
     public.merge(protected)
 }
 
@@ -138,6 +147,9 @@ pub async fn register_author(
     }
 
     if payload.password.trim().len() < 8 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if payload.name.trim().is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -223,7 +235,7 @@ pub async fn login_author(
 }
 
 pub async fn auth_middleware(
-    State(secret): State<String>,
+    State(auth): State<AuthorAuthState>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -238,8 +250,19 @@ pub async fn auth_middleware(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let subject =
-        verify_auth_token_with_secret(token, &secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        verify_auth_token_with_secret(token, &auth.secret).map_err(|_| StatusCode::UNAUTHORIZED)?;
     let author_id = Uuid::parse_str(&subject).map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    if let Some(db) = &auth.db {
+        if AuthorEntity::find_by_id(author_id)
+            .one(db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .is_none()
+        {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
 
     req.extensions_mut().insert(AuthenticatedUser { author_id });
 
@@ -278,7 +301,7 @@ mod tests {
         let protected = Router::new()
             .route("/private", get(protected_identity))
             .route_layer(middleware::from_fn_with_state(
-                TEST_SECRET.to_string(),
+                AuthorAuthState { secret: TEST_SECRET.to_string(), db: None },
                 auth_middleware,
             ));
         public.merge(protected)
