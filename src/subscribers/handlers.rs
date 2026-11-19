@@ -168,11 +168,25 @@ fn filter_visible_subscribers(subscribers: Vec<subscribers::Model>) -> Vec<subsc
         .collect()
 }
 
+fn require_subscriber_admin(user: &AuthenticatedUser) -> Result<(), StatusCode> {
+    let allowed_ids = env::var("SUBSCRIBER_ADMIN_AUTHOR_IDS").unwrap_or_default();
+    if allowed_ids
+        .split(',')
+        .filter_map(|value| Uuid::parse_str(value.trim()).ok())
+        .any(|id| id == user.author_id)
+    {
+        Ok(())
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
 // get all subscribers
 pub async fn get_subscribers(
     State(state): State<AppState>,
-    Extension(_user): Extension<AuthenticatedUser>,
+    Extension(user): Extension<AuthenticatedUser>,
 ) -> Result<Json<Vec<Subscriber>>, StatusCode> {
+    require_subscriber_admin(&user)?;
     let subscribers = SubscriberEntity::find()
         .filter(crate::entities::subscribers::Column::Status.eq(CONFIRMED_SUBSCRIPTION_STATUS))
         .all(&state.db)
@@ -187,7 +201,7 @@ pub async fn get_subscribers(
             subscribed_at: s.subscribed_at,
             name: s.name,
             status: s.status,
-            confirmation_token: Some(s.confirmation_token),
+            confirmation_token: None,
         })
         .collect();
 
@@ -197,9 +211,10 @@ pub async fn get_subscribers(
 // get subscriber by ID
 pub async fn get_subscriber(
     State(state): State<AppState>,
-    Extension(_user): Extension<AuthenticatedUser>,
+    Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Subscriber>, StatusCode> {
+    require_subscriber_admin(&user)?;
     let subscriber = SubscriberEntity::find_by_id(id)
         .one(&state.db)
         .await
@@ -216,7 +231,7 @@ pub async fn get_subscriber(
         subscribed_at: subscriber.subscribed_at,
         name: subscriber.name,
         status: subscriber.status,
-        confirmation_token: Some(subscriber.confirmation_token),
+        confirmation_token: None,
     }))
 }
 
@@ -225,19 +240,44 @@ pub async fn create_subscriber(
     State(state): State<AppState>,
     Json(payload): Json<CreateSubscriber>,
 ) -> Result<Json<Subscriber>, StatusCode> {
-    validate_email(&payload.email).map_err(|message| {
+    let email = payload.email.trim().to_ascii_lowercase();
+    validate_email(&email).map_err(|message| {
         eprintln!("{message}");
         StatusCode::BAD_REQUEST
     })?;
 
-    let existing_subscriber = SubscriberEntity::find()
-        .filter(crate::entities::subscribers::Column::Email.eq(payload.email.trim()))
+    if let Some(existing_subscriber) = SubscriberEntity::find()
+        .filter(crate::entities::subscribers::Column::Email.eq(&email))
         .one(&state.db)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        if existing_subscriber.status == CONFIRMED_SUBSCRIPTION_STATUS {
+            return Err(StatusCode::CONFLICT);
+        }
 
-    if existing_subscriber.is_some() {
-        return Err(StatusCode::CONFLICT);
+        let confirmation_token = generate_confirmation_token(existing_subscriber.id).map_err(|err| {
+            eprintln!("{err}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+        let confirmation_link = build_confirmation_link(&confirmation_token);
+        let mut active: subscribers::ActiveModel = existing_subscriber.into();
+        active.name = Set(payload.name.trim().to_string());
+        active.confirmation_token = Set(confirmation_token);
+        let saved = active.update(&state.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if let Err(err) = send_confirmation_email(&saved.email, &confirmation_link) {
+            eprintln!("failed to send confirmation email: {err}");
+        }
+
+        return Ok(Json(Subscriber {
+            id: saved.id,
+            email: saved.email,
+            subscribed_at: saved.subscribed_at,
+            name: saved.name,
+            status: saved.status,
+            confirmation_token: None,
+        }));
     }
 
     let subscriber_id = Uuid::new_v4();
@@ -249,7 +289,7 @@ pub async fn create_subscriber(
 
     let new_subscriber = subscribers::ActiveModel {
         id: Set(subscriber_id),
-        email: Set(payload.email.trim().to_string()),
+        email: Set(email.clone()),
         name: Set(payload.name.trim().to_string()),
         subscribed_at: Set(Utc::now().naive_utc()),
         status: Set(PENDING_SUBSCRIPTION_STATUS.to_string()),
@@ -271,7 +311,7 @@ pub async fn create_subscriber(
         subscribed_at: saved.subscribed_at,
         name: saved.name,
         status: saved.status,
-        confirmation_token: Some(saved.confirmation_token),
+        confirmation_token: None,
     }))
 }
 
@@ -312,6 +352,15 @@ pub async fn confirm_subscription(
         }
     };
 
+    if subscriber.status != PENDING_SUBSCRIPTION_STATUS
+        || subscriber.confirmation_token != token
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "message": "Invalid or expired confirmation token." })),
+        );
+    }
+
     let subscriber_email = subscriber.email.clone();
     let mut active_subscriber: subscribers::ActiveModel = subscriber.into();
     active_subscriber.status = Set(CONFIRMED_SUBSCRIPTION_STATUS.to_string());
@@ -336,7 +385,14 @@ pub async fn confirm_subscription(
 }
 
 // delete subscriber
-pub async fn delete_subscriber(State(state): State<AppState>, Path(id): Path<Uuid>) -> StatusCode {
+pub async fn delete_subscriber(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<Uuid>,
+) -> StatusCode {
+    if require_subscriber_admin(&user).is_err() {
+        return StatusCode::FORBIDDEN;
+    }
     println!("deleting the subscriber {}", id);
 
     match SubscriberEntity::delete_by_id(id).exec(&state.db).await {
