@@ -28,11 +28,15 @@ async fn require_published_story(state: &AppState, story_id: Uuid) -> Result<(),
 pub fn routes(jwt_secret: String, db: sea_orm::DatabaseConnection) -> Router<AppState> {
     let public = Router::new()
         .route("/claps/{story_id}", get(claps_total))
-        .route("/comments/{story_id}", get(list_comments));
+        .route("/comments/{id}", get(list_comments));
     let protected = Router::new()
         .route("/claps/{story_id}", post(add_clap).delete(remove_clap))
-        .route("/comments/{story_id}", post(create_comment))
-        .route("/comments/{id}", put(update_comment).delete(delete_comment))
+        .route(
+            "/comments/{id}",
+            post(create_comment)
+                .put(update_comment)
+                .delete(delete_comment),
+        )
         .route("/bookmarks", get(list_bookmarks))
         .route("/bookmarks/{story_id}", put(add_bookmark).delete(remove_bookmark))
         .route("/highlights/{story_id}", get(list_highlights).post(add_highlight))
