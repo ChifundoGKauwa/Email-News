@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::readers::AuthenticatedReader;
 use crate::entities::{bookmarks, claps, comments, highlights, newsletters};
 use crate::entities::readers::Entity as ReaderEntity;
-use axum::{Extension, Json, Router, extract::{Path, State}, http::StatusCode, middleware, routing::{get, post, put, delete}};
+use axum::{Extension, Json, Router, extract::{Path, State}, http::StatusCode, middleware, routing::{get, post, put}};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
@@ -39,8 +39,12 @@ pub fn routes(jwt_secret: String, db: sea_orm::DatabaseConnection) -> Router<App
         )
         .route("/bookmarks", get(list_bookmarks))
         .route("/bookmarks/{story_id}", put(add_bookmark).delete(remove_bookmark))
-        .route("/highlights/{story_id}", get(list_highlights).post(add_highlight))
-        .route("/highlights/{id}", delete(delete_highlight))
+        .route(
+            "/highlights/{id}",
+            get(list_highlights)
+                .post(add_highlight)
+                .delete(delete_highlight),
+        )
         .route_layer(middleware::from_fn_with_state(crate::readers::ReaderAuthState { secret: jwt_secret, db }, crate::readers::reader_middleware));
     public.merge(protected)
 }
